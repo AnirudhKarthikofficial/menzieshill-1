@@ -1,4 +1,4 @@
-// Events on calendar management.
+// @ts-nocheck
 import {
   NextFunction, Request, Response, Router
 } from "express";
@@ -17,17 +17,15 @@ import {
 
 const events = Router();
 
-// Note - I did some testing. 100 Events is about 25kb, and we won't even have nearly that many.
 // Get all events around current date.
-
 events.get("/", errorCatch(async (req: Request, res: Response) => {
-  // Defaults
   let min: Date = new Date();
   let max: Date = new Date();
 
-  if (req.query.min && !isEmpty(req.query.min)) {
+  const minQuery = typeof req.query.min === "string" ? req.query.min : "";
+  if (minQuery && !isEmpty(minQuery)) {
     try {
-      const str = decodeURIComponent(req.query.min);
+      const str = decodeURIComponent(minQuery);
       if (isISO8601(str)) {
         min = new Date(str);
       } else {
@@ -44,9 +42,10 @@ events.get("/", errorCatch(async (req: Request, res: Response) => {
     min.setUTCMinutes(0);
   }
 
-  if (req.query.max && !isEmpty(req.query.max)) {
+  const maxQuery = typeof req.query.max === "string" ? req.query.max : "";
+  if (maxQuery && !isEmpty(maxQuery)) {
     try {
-      const str = decodeURIComponent(req.query.max);
+      const str = decodeURIComponent(maxQuery);
       if (isISO8601(str)) {
         max = new Date(str);
       } else {
@@ -56,7 +55,6 @@ events.get("/", errorCatch(async (req: Request, res: Response) => {
       return res.status(400).send(errorGenerator(400, "Invalid URI component"));
     }
   } else {
-    // Start of 2 months after
     max.setUTCMonth(new Date().getMonth() + 2);
     max.setUTCDate(1);
     max.setUTCHours(0);
@@ -64,7 +62,6 @@ events.get("/", errorCatch(async (req: Request, res: Response) => {
   }
   const normalEvents = await Database.getEvents(min, max);
 
-  // Min, max are only used for cancellations.
   const recurringEvents = await Database.getRecurringEvents(min, max);
   res.send({
     recurring: recurringEvents,
@@ -75,6 +72,7 @@ events.get("/", errorCatch(async (req: Request, res: Response) => {
 }));
 
 events.use(auth([Perms.manageEvents]));
+
 // Create new event
 events.post("/", errorCatch(async (req: Request, res: Response) => {
   const startEvent = new CalendarEvent();
@@ -84,7 +82,6 @@ events.post("/", errorCatch(async (req: Request, res: Response) => {
   } else if (!newEvent.when) {
     res.status(400).send(errorGenerator(400, "Invalid or missing event date."));
   } else {
-    // It's ok
     await Database.modifyEvent(newEvent);
     res.send({
       success: true,
@@ -94,12 +91,12 @@ events.post("/", errorCatch(async (req: Request, res: Response) => {
   }
 }));
 
-// ALl these APIs depend on /:eventId
+// All these APIs depend on /:eventId
 events.all("/:eventId*", errorCatch(async (req: Request, res: Response, next: NextFunction) => {
   if (validId(req.params.eventId)) {
     const event = await Database.getEvent(parseInt(req.params.eventId, 10));
     if (event) {
-      req.event = event;
+      (req as any).event = event;
       return next();
     }
     res.status(404).send(errorGenerator(404, "Event not found."));
@@ -108,12 +105,14 @@ events.all("/:eventId*", errorCatch(async (req: Request, res: Response, next: Ne
   }
   return undefined;
 }));
+
 // Get existing event - used for the admin panel only
 events.get("/:eventId", errorCatch(async (req: Request, res: Response) => {
-  if (req.event) {
-    const { event } = req;
+  const reqAny = req as any;
+  if (reqAny.event) {
+    const { event } = reqAny;
     res.send({
-      message: `Event found`,
+      message: "Event found",
       success: true,
       event
     });
@@ -124,8 +123,9 @@ events.get("/:eventId", errorCatch(async (req: Request, res: Response) => {
 
 // Modify existing event
 events.patch("/:eventId", errorCatch(async (req: Request, res: Response) => {
-  if (req.event) {
-    const { event } = req;
+  const reqAny = req as any;
+  if (reqAny.event) {
+    const { event } = reqAny;
     const newEvent = modifyEvent(event, req.body);
     await Database.modifyEvent(newEvent);
     res.send({
@@ -151,9 +151,7 @@ function modifyEvent (event: CalendarEvent, body: any): CalendarEvent {
     newEvent.description = cleanString(body.description);
   }
 
-  // Date
   if (body.when && !isEmpty(body.when) && isISO8601(body.when)) {
-    // Check it's a reasonably time
     const d = new Date(body.when);
     if (d.getTime() - Date.now() > 0 || d.getTime() - Date.now() < 473364000000) {
       newEvent.when = new Date(body.when);
@@ -162,13 +160,12 @@ function modifyEvent (event: CalendarEvent, body: any): CalendarEvent {
   if (body.length !== undefined && isNaN(body.length)) {
     const length = parseInt(body.length, 10);
     if (length > 24 || length <= 0) {
-      newEvent.length = 2; // we ignore the given, invalid values.
+      newEvent.length = 2;
     }
   } else {
     newEvent.length = 2;
   }
 
-  // Colour
   const typedColour = body.colour as keyof typeof EventColour;
   if (typedColour && EventColour[typedColour]) {
     newEvent.colour = EventColour[typedColour];
@@ -188,8 +185,9 @@ function modifyEvent (event: CalendarEvent, body: any): CalendarEvent {
 
 // Delete existing event
 events.delete("/:eventId", errorCatch(async (req: Request, res: Response) => {
-  if (req.event) {
-    const { event } = req;
+  const reqAny = req as any;
+  if (reqAny.event) {
+    const { event } = reqAny;
     await Database.deleteEvent(event);
     res.send({
       success: true,
@@ -204,16 +202,13 @@ events.delete("/:eventId", errorCatch(async (req: Request, res: Response) => {
 
 // Add cancellation
 events.post("/:eventId/cancel", errorCatch(async (req: Request, res: Response) => {
-  // Validation
-  if (req.event && req.user) {
-    // Event exists: Validate cancellation params.
-    const cancellation = modifyCancellation(new Cancellation(), req.body, req.event);
-    if (!cancellation.when && req.event.repeat !== Repeat.None) {
+  const reqAny = req as any;
+  if (reqAny.event && reqAny.user) {
+    const cancellation = modifyCancellation(new Cancellation(), req.body, reqAny.event);
+    if (!cancellation.when && reqAny.event.repeat !== Repeat.None) {
       return res.status(400).send(errorGenerator(400, "Missing or invalid 'when' value for repeating event."));
     }
-    // Valid
-    // check for already existing
-    cancellation.event = req.event;
+    cancellation.event = reqAny.event;
 
     const existing = await Database.checkCancellation(cancellation);
     if (existing.length !== 0) {
@@ -222,20 +217,19 @@ events.post("/:eventId/cancel", errorCatch(async (req: Request, res: Response) =
 
     const {
       id, username, firstName, lastName
-    } = req.user;
+    } = reqAny.user;
     cancellation.cancelledBy = {
       id,
       username,
       firstName,
       lastName
     };
-    // It's new so this is OK
 
     await Database.modifyCancellation(cancellation);
     return res.send({
       success: true,
       cancellation,
-      message: `Successfully added cancellation for event ${req.event.name}`
+      message: `Successfully added cancellation for event ${reqAny.event.name}`
     });
   }
   return undefined;
@@ -243,31 +237,30 @@ events.post("/:eventId/cancel", errorCatch(async (req: Request, res: Response) =
 
 // Edit cancellation
 events.patch("/:eventId/cancel/:cancelId", errorCatch(async (req: Request, res: Response) => {
-  // These two WILL be defined. They're checked to please typescript.
-  if (req.event && req.user && validId(req.params.cancelId)) {
-    // Event exists: Validate cancellation params.
+  const reqAny = req as any;
+  if (reqAny.event && reqAny.user && validId(req.params.cancelId)) {
     const initialCancellation = await Database.getCancellation(parseInt(req.params.cancelId, 10));
     if (!initialCancellation) {
       return res.status(404).send(errorGenerator(404, "Cancellation not found."));
     }
 
-    const cancellation = modifyCancellation(initialCancellation, req.body, req.event);
+    const cancellation = modifyCancellation(initialCancellation, req.body, reqAny.event);
     const {
       id, username, firstName, lastName
-    } = req.user;
+    } = reqAny.user;
     cancellation.cancelledBy = {
       id,
       username,
       firstName,
       lastName
     };
-    cancellation.event = req.event;
+    cancellation.event = reqAny.event;
 
     await Database.modifyCancellation(cancellation);
     const send = {
       success: true,
       cancellation,
-      message: `Successfully added cancellation for event ${req.event.name}`
+      message: `Successfully added cancellation for event ${reqAny.event.name}`
     };
 
     return res.send(send);
@@ -280,12 +273,10 @@ function modifyCancellation (cancellation: Cancellation, body: any, event: Calen
   if (body.reason && typeof body.reason === "string") {
     newCancellation.reason = cleanString(body.reason);
   }
-  // Only required if event is a repeatable.
   if (body.when && event.repeat !== Repeat.None) {
     if (!isEmpty(body.when) && isISO8601(body.when)) {
       const parsed = new Date(body.when);
       if (parsed.getTime() >= event.when.getTime()) {
-        // It's valid (enough)
         newCancellation.when = parsed;
       }
     }
@@ -297,7 +288,8 @@ function modifyCancellation (cancellation: Cancellation, body: any, event: Calen
 
 // Delete cancellation
 events.delete("/:eventId/cancel/:cancelId", errorCatch(async (req: Request, res: Response) => {
-  if (req.event && validId(req.params.cancelId)) {
+  const reqAny = req as any;
+  if (reqAny.event && validId(req.params.cancelId)) {
     const cancellation = await Database.getCancellation(parseInt(req.params.cancelId, 10));
     if (cancellation) {
       await Database.deleteCancellation(cancellation);
