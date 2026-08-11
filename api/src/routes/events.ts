@@ -25,9 +25,10 @@ events.get("/", errorCatch(async (req: Request, res: Response) => {
   let min: Date = new Date();
   let max: Date = new Date();
 
-  if (req.query.min && !isEmpty(req.query.min)) {
+  // FIX: Cast req.query.min as string to resolve TS2345
+  if (req.query.min && !isEmpty(req.query.min as string)) {
     try {
-      const str = decodeURIComponent(req.query.min);
+      const str = decodeURIComponent(req.query.min as string);
       if (isISO8601(str)) {
         min = new Date(str);
       } else {
@@ -44,9 +45,10 @@ events.get("/", errorCatch(async (req: Request, res: Response) => {
     min.setUTCMinutes(0);
   }
 
-  if (req.query.max && !isEmpty(req.query.max)) {
+  // FIX: Cast req.query.max as string to resolve TS2345
+  if (req.query.max && !isEmpty(req.query.max as string)) {
     try {
-      const str = decodeURIComponent(req.query.max);
+      const str = decodeURIComponent(req.query.max as string);
       if (isISO8601(str)) {
         max = new Date(str);
       } else {
