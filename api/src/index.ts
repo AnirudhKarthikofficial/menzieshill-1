@@ -12,7 +12,8 @@ import bodyParser from "body-parser";
 import cookieParser from "cookie-parser";
 import "reflect-metadata";
 import cors from "cors";
-import express from "express";
+// FIX: Imported Request, Response, and NextFunction explicitly
+import express, { Request, Response, NextFunction } from "express";
 import helmet from "helmet";
 
 import { port, sentryDsn } from "../config";
@@ -54,7 +55,8 @@ app.use("/contact", contact);
 
 app.use("/groups", groups);
 
-app.get("/", (_req, res) => res.send({
+// FIX: Added typings to the root route
+app.get("/", (_req: Request, res: Response) => res.send({
   message: "API root. No docs are available.",
   status: 200
 }));
@@ -64,7 +66,8 @@ app.use(sentry.Handlers.errorHandler());
 app.use(errorHandler);
 
 // 404
-app.use((_req, res, _next) => {
+// FIX: Added explicit typings here to prevent TS2769 (No overload matches this call)
+app.use((_req: Request, res: Response, _next: NextFunction) => {
   res.status(404).send(errorGenerator(404, "Resource not found."));
 });
 
